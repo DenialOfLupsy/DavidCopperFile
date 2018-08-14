@@ -10,7 +10,7 @@ import (
 )
 
 type Row struct {
-	// TODO type
+	// TODO later differentiate types
 	signature, iso, offset, extension, description []string
 }
 
@@ -18,65 +18,20 @@ var magicTable []Row
 
 func main() {
 
-	// Getting the wikipedia page
+	// Getting the wikipedia page.
 	resp, err := http.Get("https://en.wikipedia.org/wiki/List_of_file_signatures")
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	n, _ := html.Parse(resp.Body)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Parse table with magic numbers
+	// Parse html and set the variable magicTable.
 	ParseTable(n)
-
 	fmt.Printf("magic table : %#v", magicTable)
-
-	//
-	//
-	//
-	//
-	//
-	//DA CANCELLARE
-	// parse della pagina per ottenere la tabella
-	z := html.NewTokenizer(resp.Body)
-	for {
-		break
-		tt := z.Next()
-		//fmt.Printf("%#v\n", tt)
-		if tt == html.ErrorToken {
-			// ...
-			return
-		}
-		// Process the current token.
-		if tt == html.StartTagToken {
-			tagname, _ := z.TagName()
-			//fmt.Println( string(tagname))
-			_, value, _ := z.TagAttr()
-			//fmt.Printf("%s", value) //!!!!!! non mi da quello che voglio, vedi output
-			if string(tagname) == "table" && string(value) == "wikitable sortable" {
-				//var tsignature, tiso, toffset, textension, tdescription string
-				for {
-					// raggiungere il tag <tr>
-					tt = z.Next()
-					tagname, _ = z.TagName()
-					if tt == html.StartTagToken && string(tagname) == "tr" {
-						//fmt.Println(z.Text())
-						//fmt.Println(html.TextToken)
-					}
-
-				}
-				//tt:= z.Next() //cerco il prossimo <tr>
-
-				//magicTable = make map[string]Row
-				//magicTable[] = Row{ ; ; ; ;}
-			} //TODO testare la printf per vedere se stampa "wikitable sortable", poi capire come fare a prendere i 5 tr successivi e poi metterli in variabili temporanee e parsarli nel modo giusto. Nel caso in cui ci fossero più stringhe devo fare più righe della mappa?
-		}
-	}
-	//n := html.Parse(resp.Body)
-	//n, _ = html.Parse(strings.NewReader(`<html><head></head><body><table><tbody><tr><td><pre>a1 b2 c3 d4</pre><pre>d4 c3 b2 a1</pre></td><td><pre>....</pre></td><td>0</td><td>pcap</td><td>Libpcap File Format<sup id="cite_ref-1" class="reference"><a href="#cite_note-1">&#91;1&#93;</a></sup></td></tr></tbody></table></body></html>`))
-	//fmt.Printf("%#v", ParseRow(n))
 }
 
 func ParseCell(n *html.Node, column int, r *Row) {
@@ -90,23 +45,20 @@ func ParseTable(n *html.Node) {
 	/* Parse the page until the table tag is reached.
 	The class tag value should be equal to "wikitable sortable", i.e. <table class="wikitable sortable"> */
 
-	//fmt.Printf("%#v --------", n.Data)
 	if n.Type == html.ElementNode && n.Data == "table" {
 		for _, a := range n.Attr {
-			//fmt.Println(a.Key, a.Val)
 			if a.Key == "class" && a.Val == "wikitable sortable" {
-				// Parse Row.
-				//fmt.Println(n.Data)
-				//fmt.Println(n.FirstChild.Data)
-				//fmt.Println(n.FirstChild.NextSibling.Data)
-				//fmt.Println(n.FirstChild.NextSibling.FirstChild.Data)
-				//fmt.Printf("%#v\n", ParseRow(n.FirstChild.NextSibling.FirstChild))
 				for c := n.FirstChild.NextSibling.FirstChild; c != nil; c = c.NextSibling {
-					//fmt.Println(c.Data)
-					magicTable = append(magicTable, ParseRow(c))
-					//fmt.Println(t)
+					thisRow := ParseRow(c)
+					if len(thisRow.signature) == 0 &&
+						len(thisRow.iso) == 0 &&
+						len(thisRow.offset) == 0 &&
+						len(thisRow.extension) == 0 &&
+						len(thisRow.description) == 0 {
+						continue
+					}
+					magicTable = append(magicTable, thisRow)
 				}
-
 			}
 		}
 	}
@@ -117,19 +69,16 @@ func ParseTable(n *html.Node) {
 }
 
 func ParseRow(n *html.Node) Row {
+	/* Parses row differently for each column */
 	var r Row
 	colnum := 0
 
-	//fmt.Println(n.Data)
-	//for c := n.FirstChild.FirstChild.NextSibling.FirstChild.FirstChild.FirstChild.FirstChild; c != nil; c = c.NextSibling {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		// If the type is text, then skip (it's some \n in the html). The next sibling should be a valid tag.
 		if c.Type == html.TextNode {
 			continue
 		}
-		//fmt.Println(c.Type)
-		//fmt.Println(121)
-		//fmt.Printf("ParseRow : %#v ..........\n\n", c.Data)
+
 		colnum++
 		switch {
 		case colnum == 1:
@@ -151,17 +100,15 @@ func ParseRow(n *html.Node) Row {
 		if colnum > 6 {
 			fmt.Println("Error: too many columns")
 		}
-
 	}
-	//fmt.Println(r)
+	fmt.Println(r)
 	return r
 }
 
 func ExtractText(n *html.Node) []string {
-	//fmt.Printf("%\v", n)
+	/* Extract text recursively from the n node down to the bottom of the tree. */
 	if n.Type == html.TextNode {
 		trimmed := strings.TrimSpace(n.Data)
-		//fmt.Printf("%\v", trimmed)
 		if trimmed == "" {
 			return []string{}
 		}
@@ -180,14 +127,14 @@ func ExtractText(n *html.Node) []string {
 }
 
 func ExtractList(n *html.Node) []string {
-	// TODO: NOT TESTED YET
+	// TODO: NOT TESTED NOR USED YET
 	if n.Type == html.TextNode {
 		trimmed := strings.TrimSpace(n.Data)
 		if trimmed == "" {
 			return []string{}
 		}
 
-		// Removes some invisible character and makes a list.
+		// Removes some invisible character and makes a comma separated list.
 		for _, i := range []string{"\a", "\b", "\f", "\r", "\t", "\v"} {
 			trimmed = strings.Replace(trimmed, i, "", -1)
 		}
