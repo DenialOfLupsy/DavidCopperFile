@@ -18,12 +18,27 @@ var magicTable []Row
 
 func main() {
 
-	// ottengo la pagina wikipedia contenente i magic number
+	// Getting the wikipedia page
 	resp, err := http.Get("https://en.wikipedia.org/wiki/List_of_file_signatures")
 	if err != nil {
 		log.Fatal(err)
 	}
+	n, _ := html.Parse(resp.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
 
+	// Parse table with magic numbers
+	ParseTable(n)
+
+	fmt.Printf("magic table : %#v", magicTable)
+
+	//
+	//
+	//
+	//
+	//
+	//DA CANCELLARE
 	// parse della pagina per ottenere la tabella
 	z := html.NewTokenizer(resp.Body)
 	for {
@@ -60,73 +75,97 @@ func main() {
 		}
 	}
 	//n := html.Parse(resp.Body)
-	n, _ := html.Parse(strings.NewReader(`
-		<th>Hex signature
-</th>
-<th>ISO 8859-1
-</th>
-<th>Offset
-</th>
-<th>File extension
-</th>
-<th>Description
-</th></tr>
-<tr>
-<td><pre>a1 b2 c3 d4</pre>
-<pre>d4 c3 b2 a1</pre>
-</td>
-<td><pre>....</pre>
-</td>
-<td>0
-</td>
-<td>pcap
-</td>
-<td>Libpcap File Format<sup id="cite_ref-1" class="reference"><a href="#cite_note-1">&#91;1&#93;</a></sup>
-</td>`))
-	fmt.Printf("%#v", ParseRow(n))
-
+	//n, _ = html.Parse(strings.NewReader(`<html><head></head><body><table><tbody><tr><td><pre>a1 b2 c3 d4</pre><pre>d4 c3 b2 a1</pre></td><td><pre>....</pre></td><td>0</td><td>pcap</td><td>Libpcap File Format<sup id="cite_ref-1" class="reference"><a href="#cite_note-1">&#91;1&#93;</a></sup></td></tr></tbody></table></body></html>`))
+	//fmt.Printf("%#v", ParseRow(n))
 }
 
 func ParseCell(n *html.Node, column int, r *Row) {
-
+	// TODO
 	if n.Type == html.TextNode {
 
+	}
+}
+
+func ParseTable(n *html.Node) {
+	/* Parse the page until the table tag is reached.
+	The class tag value should be equal to "wikitable sortable", i.e. <table class="wikitable sortable"> */
+
+	//fmt.Printf("%#v --------", n.Data)
+	if n.Type == html.ElementNode && n.Data == "table" {
+		for _, a := range n.Attr {
+			//fmt.Println(a.Key, a.Val)
+			if a.Key == "class" && a.Val == "wikitable sortable" {
+				// Parse Row.
+				//fmt.Println(n.Data)
+				//fmt.Println(n.FirstChild.Data)
+				//fmt.Println(n.FirstChild.NextSibling.Data)
+				//fmt.Println(n.FirstChild.NextSibling.FirstChild.Data)
+				//fmt.Printf("%#v\n", ParseRow(n.FirstChild.NextSibling.FirstChild))
+				for c := n.FirstChild.NextSibling.FirstChild; c != nil; c = c.NextSibling {
+					//fmt.Println(c.Data)
+					magicTable = append(magicTable, ParseRow(c))
+					//fmt.Println(t)
+				}
+
+			}
+		}
+	}
+	// Keep looking for the right table.
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		ParseTable(c)
 	}
 }
 
 func ParseRow(n *html.Node) Row {
 	var r Row
 	colnum := 0
+
+	//fmt.Println(n.Data)
+	//for c := n.FirstChild.FirstChild.NextSibling.FirstChild.FirstChild.FirstChild.FirstChild; c != nil; c = c.NextSibling {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		//fmt.Printf("%#v\n\n", c)
+		// If the type is text, then skip (it's some \n in the html). The next sibling should be a valid tag.
+		if c.Type == html.TextNode {
+			continue
+		}
+		//fmt.Println(c.Type)
+		//fmt.Println(121)
+		//fmt.Printf("ParseRow : %#v ..........\n\n", c.Data)
 		colnum++
 		switch {
 		case colnum == 1:
 			r.signature = ExtractText(c)
-			fmt.Printf("Signature: -- %#v\n\n", r.signature)
+			//fmt.Printf("Signature: -- %#v\n\n", r.signature)
 		case colnum == 2:
 			r.iso = ExtractText(c)
+			//fmt.Printf("ISO: -- %#v\n\n", r.iso)
 		case colnum == 3:
 			r.offset = ExtractText(c)
+			//fmt.Printf("Offset: -- %#v\n\n", r.offset)
 		case colnum == 4:
 			r.extension = ExtractList(c)
+			//fmt.Printf("Extension: -- %#v\n\n", r.extension)
 		case colnum == 5:
 			r.description = ExtractText(c)
+			//fmt.Printf("Description: -- %#v\n\n", r.description)
 		}
 		if colnum > 6 {
 			fmt.Println("Error: too many columns")
 		}
+
 	}
+	//fmt.Println(r)
 	return r
 }
 
 func ExtractText(n *html.Node) []string {
+	//fmt.Printf("%\v", n)
 	if n.Type == html.TextNode {
 		trimmed := strings.TrimSpace(n.Data)
+		//fmt.Printf("%\v", trimmed)
 		if trimmed == "" {
 			return []string{}
 		}
-		//trim any invisible character
+		// Removes any invisible character.
 		for _, i := range []string{"\a", "\b", "\f", "\n", "\r", "\t", "\v"} {
 			trimmed = strings.Replace(trimmed, i, "", -1)
 		}
@@ -136,17 +175,19 @@ func ExtractText(n *html.Node) []string {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		accumulator = append(accumulator, ExtractText(c)...)
 	}
+
 	return accumulator
 }
 
 func ExtractList(n *html.Node) []string {
+	// TODO: NOT TESTED YET
 	if n.Type == html.TextNode {
 		trimmed := strings.TrimSpace(n.Data)
 		if trimmed == "" {
 			return []string{}
 		}
 
-		//trim some invisible character and made a list
+		// Removes some invisible character and makes a list.
 		for _, i := range []string{"\a", "\b", "\f", "\r", "\t", "\v"} {
 			trimmed = strings.Replace(trimmed, i, "", -1)
 		}
