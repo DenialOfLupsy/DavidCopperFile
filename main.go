@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -15,6 +19,9 @@ type Row struct {
 }
 
 var magicTable []Row
+
+// Flags.
+var infile = flag.String("i", "", "The input file, optional if file is last parameter")
 
 func main() {
 
@@ -31,7 +38,117 @@ func main() {
 
 	// Parse html and set the variable magicTable.
 	ParseTable(n)
-	fmt.Printf("magic table : %#v", magicTable)
+	//fmt.Printf("magic table : %#v", magicTable)
+
+	// Read file.
+	var currentOffset int64
+
+	file, err := os.OpenFile("/tmp/test", os.O_RDONLY, 0777)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	//var currentMagicByte string
+	for _, row := range magicTable {
+		for _, off := range row.offset { //[]interface{row.description, row.extension, row.iso, ro} {
+			// establish what kind of value it is and transform that to an int? hex?.
+
+			currentOffset, err = strconv.ParseInt(off, 0, 0)
+
+			switch {
+			case err == nil:
+				// It's an int.
+				for _, s := range row.signature {
+					if strings.Contains(s, "?") {
+						// do something to handle this :S
+
+					}
+
+					// Seek to the right offset.
+					//fmt.Printf("%d\n", currentOffset)
+					_, err = file.Seek(currentOffset, 0)
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					// Elaborate the signature string.
+					var s2b []byte
+					temp1 := strings.ToLower(s)
+					temp2 := strings.Split(temp1, " ")
+					for _, v := range temp2 {
+						temp3, _ := strconv.ParseInt(v, 16, 0)
+						s2b = append(s2b, byte(temp3))
+					}
+
+					// Read len(s2s) byte from file.
+					b := make([]byte, len(s2b))
+					_, err := file.Read(b)
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					fmt.Printf("Bytes read from file: %#v\n", b)
+					fmt.Printf("Bytes in db: %#v\n", s2b)
+					fmt.Printf("String in db: %#v\n", s)
+
+					if bytes.Equal(s2b, b) {
+						fmt.Printf("Filetype: %#v.\n", row.description)
+						//fmt.Printf("%#v", row)
+						return
+					}
+					//fmt.Println("no match")
+				}
+
+			case off == "any":
+
+				// TODO make a function for what follows...... ()
+				currentOffset = 0
+				for currentOffset = 0; currentOffset < 100; currentOffset++ {
+					for _, s := range row.signature {
+						if strings.Contains(s, "?") {
+							// do something to handle this :/
+						}
+
+						// Seek to the right offset.
+						_, err = file.Seek(currentOffset, 0)
+						if err != nil {
+							log.Fatal(err)
+						}
+
+						// Elaborate the signature string.
+						var s2b []byte
+						temp1 := strings.ToLower(s)
+						temp2 := strings.Split(temp1, " ")
+						for _, v := range temp2 {
+							temp3, _ := strconv.ParseInt(v, 16, 0)
+							s2b = append(s2b, byte(temp3))
+						}
+
+						// Read len(s2s) byte from file.
+						b := make([]byte, len(s2b))
+						_, err := file.Read(b)
+						if err != nil {
+							log.Fatal(err)
+						}
+
+						//fmt.Printf("Bytes read from file: %#v\n", b)
+						//fmt.Printf("Bytes in db: %#v\n", s2b)
+						//fmt.Printf("String in db: %#v\n", s)
+
+						if bytes.Equal(s2b, b) {
+							fmt.Printf("Filetype: %#v.\n", row.description)
+							//fmt.Printf("%#v", row)
+							return
+						}
+						//fmt.Println("no match")
+					}
+				}
+			default:
+				// In any other case: TODO.
+			}
+		}
+	}
 }
 
 func ParseCell(n *html.Node, column int, r *Row) {
@@ -101,7 +218,7 @@ func ParseRow(n *html.Node) Row {
 			fmt.Println("Error: too many columns")
 		}
 	}
-	fmt.Println(r)
+	//fmt.Println(r)
 	return r
 }
 
@@ -146,4 +263,8 @@ func ExtractList(n *html.Node) []string {
 		accumulator = append(accumulator, ExtractText(c)...)
 	}
 	return accumulator
+}
+
+func ElaborateOffset(s []string) {
+
 }
