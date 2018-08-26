@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -20,10 +21,8 @@ type Row struct {
 
 var magicTable []Row
 
-// Flags.
-var infile = flag.String("i", "", "The input file, optional if file is last parameter")
-
 func main() {
+	flag.Parse()
 
 	// Getting the wikipedia page.
 	resp, err := http.Get("https://en.wikipedia.org/wiki/List_of_file_signatures")
@@ -38,129 +37,55 @@ func main() {
 
 	// Parse html and set the variable magicTable.
 	ParseTable(n)
-	//fmt.Printf("magic table : %#v", magicTable)
 
-	// Read file.
-	var currentOffset int64
-
-	file, err := os.OpenFile("/tmp/test", os.O_RDONLY, 0777)
-	if err != nil {
-		log.Fatal(err)
+	if len(flag.Args()) == 0 {
+		fmt.Println("Please provide at least one file.")
 	}
-	defer file.Close()
+	for _, fname := range flag.Args() {
+		file, err := os.OpenFile(fname, os.O_RDONLY, 0444)
+		if err != nil {
+			log.Fatal(err)
+		}
+		doTheMagic(file)
+		file.Close()
+	}
 
-	//var currentMagicByte string
+}
+
+func doTheMagic(file io.ReaderAt) {
+
+loop:
 	for _, row := range magicTable {
-		for _, off := range row.offset { //[]interface{row.description, row.extension, row.iso, ro} {
-			// establish what kind of value it is and transform that to an int? hex?.
+		for _, off := range row.offset {
 
-			currentOffset, err = strconv.ParseInt(off, 0, 0)
+			currentOffset, err := strconv.ParseInt(off, 0, 0)
 
 			switch {
 			case err == nil:
 				// It's an int.
-				for _, s := range row.signature {
-					if strings.Contains(s, "?") {
-						// do something to handle this :S
-
-					}
-
-					// Seek to the right offset.
-					//fmt.Printf("%d\n", currentOffset)
-					_, err = file.Seek(currentOffset, 0)
-					if err != nil {
-						log.Fatal(err)
-					}
-
-					// Elaborate the signature string.
-					var s2b []byte
-					temp1 := strings.ToLower(s)
-					temp2 := strings.Split(temp1, " ")
-					for _, v := range temp2 {
-						temp3, _ := strconv.ParseInt(v, 16, 0)
-						s2b = append(s2b, byte(temp3))
-					}
-
-					// Read len(s2s) byte from file.
-					b := make([]byte, len(s2b))
-					_, err := file.Read(b)
-					if err != nil {
-						log.Fatal(err)
-					}
-
-					fmt.Printf("Bytes read from file: %#v\n", b)
-					fmt.Printf("Bytes in db: %#v\n", s2b)
-					fmt.Printf("String in db: %#v\n", s)
-
-					if bytes.Equal(s2b, b) {
-						fmt.Printf("Filetype: %#v.\n", row.description)
-						//fmt.Printf("%#v", row)
-						return
-					}
-					//fmt.Println("no match")
+				if Match(currentOffset, file, row.signature) {
+					fmt.Printf("Filetype: %#v.\n", row.description)
+					continue loop
 				}
 
 			case off == "any":
-
-				// TODO make a function for what follows...... ()
-				currentOffset = 0
-				for currentOffset = 0; currentOffset < 100; currentOffset++ {
-					for _, s := range row.signature {
-						if strings.Contains(s, "?") {
-							// do something to handle this :/
-						}
-
-						// Seek to the right offset.
-						_, err = file.Seek(currentOffset, 0)
-						if err != nil {
-							log.Fatal(err)
-						}
-
-						// Elaborate the signature string.
-						var s2b []byte
-						temp1 := strings.ToLower(s)
-						temp2 := strings.Split(temp1, " ")
-						for _, v := range temp2 {
-							temp3, _ := strconv.ParseInt(v, 16, 0)
-							s2b = append(s2b, byte(temp3))
-						}
-
-						// Read len(s2s) byte from file.
-						b := make([]byte, len(s2b))
-						_, err := file.Read(b)
-						if err != nil {
-							log.Fatal(err)
-						}
-
-						//fmt.Printf("Bytes read from file: %#v\n", b)
-						//fmt.Printf("Bytes in db: %#v\n", s2b)
-						//fmt.Printf("String in db: %#v\n", s)
-
-						if bytes.Equal(s2b, b) {
-							fmt.Printf("Filetype: %#v.\n", row.description)
-							//fmt.Printf("%#v", row)
-							return
-						}
-						//fmt.Println("no match")
+				for currentOffset = 0; currentOffset < 256; currentOffset++ {
+					if Match(currentOffset, file, row.signature) {
+						fmt.Printf("Filetype: %#v.\n", row.description)
+						continue loop
 					}
 				}
+
 			default:
-				// In any other case: TODO.
+				// Use this case to elaborate other offset type.
 			}
 		}
 	}
 }
 
-func ParseCell(n *html.Node, column int, r *Row) {
-	// TODO
-	if n.Type == html.TextNode {
-
-	}
-}
-
+// ParseTable parses the page until the table tag is reached. The class tag
+// value should be equal to "wikitable sortable", i.e. <table class="wikitable sortable">
 func ParseTable(n *html.Node) {
-	/* Parse the page until the table tag is reached.
-	The class tag value should be equal to "wikitable sortable", i.e. <table class="wikitable sortable"> */
 
 	if n.Type == html.ElementNode && n.Data == "table" {
 		for _, a := range n.Attr {
@@ -185,45 +110,41 @@ func ParseTable(n *html.Node) {
 	}
 }
 
+// ParseRow .
 func ParseRow(n *html.Node) Row {
-	/* Parses row differently for each column */
 	var r Row
 	colnum := 0
 
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		// If the type is text, then skip (it's some \n in the html). The next sibling should be a valid tag.
+		// If the type is text, then skip (it's some \n in the html).
+		// The next sibling should be a valid tag.
 		if c.Type == html.TextNode {
 			continue
 		}
 
 		colnum++
-		switch {
-		case colnum == 1:
+
+		switch colnum {
+		case 1:
 			r.signature = ExtractText(c)
-			//fmt.Printf("Signature: -- %#v\n\n", r.signature)
-		case colnum == 2:
+		case 2:
 			r.iso = ExtractText(c)
-			//fmt.Printf("ISO: -- %#v\n\n", r.iso)
-		case colnum == 3:
+		case 3:
 			r.offset = ExtractText(c)
-			//fmt.Printf("Offset: -- %#v\n\n", r.offset)
-		case colnum == 4:
-			r.extension = ExtractList(c)
-			//fmt.Printf("Extension: -- %#v\n\n", r.extension)
-		case colnum == 5:
+		case 4:
+			r.extension = ExtractText(c)
+		case 5:
 			r.description = ExtractText(c)
-			//fmt.Printf("Description: -- %#v\n\n", r.description)
-		}
-		if colnum > 6 {
-			fmt.Println("Error: too many columns")
+		default:
+			fmt.Println("Error: too many columns.")
 		}
 	}
-	//fmt.Println(r)
 	return r
 }
 
+// ExtractText extracts text recursively from the n node down to the bottom of the tree.
 func ExtractText(n *html.Node) []string {
-	/* Extract text recursively from the n node down to the bottom of the tree. */
+
 	if n.Type == html.TextNode {
 		trimmed := strings.TrimSpace(n.Data)
 		if trimmed == "" {
@@ -243,28 +164,36 @@ func ExtractText(n *html.Node) []string {
 	return accumulator
 }
 
-func ExtractList(n *html.Node) []string {
-	// TODO: NOT TESTED NOR USED YET
-	if n.Type == html.TextNode {
-		trimmed := strings.TrimSpace(n.Data)
-		if trimmed == "" {
-			return []string{}
+// Match tests if the signatures match the ones in the current file.
+func Match(currentOffset int64, file io.ReaderAt, signatures []string) bool {
+
+	for _, s := range signatures {
+		if strings.Contains(s, "?") {
+			// do something to handle this :S
+
 		}
 
-		// Removes some invisible character and makes a comma separated list.
-		for _, i := range []string{"\a", "\b", "\f", "\r", "\t", "\v"} {
-			trimmed = strings.Replace(trimmed, i, "", -1)
+		// Elaborate the signature string.
+		var s2b []byte
+		temp1 := strings.ToLower(s)
+		temp2 := strings.Split(temp1, " ")
+		for _, v := range temp2 {
+			temp3, _ := strconv.ParseInt(v, 16, 0)
+			s2b = append(s2b, byte(temp3))
 		}
-		trimmed = strings.Replace(trimmed, "\n", ", ", -1)
-		return []string{trimmed}
-	}
-	var accumulator []string
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		accumulator = append(accumulator, ExtractText(c)...)
-	}
-	return accumulator
-}
 
-func ElaborateOffset(s []string) {
+		b := make([]byte, len(s2b))
+		_, err := file.ReadAt(b, currentOffset)
+		if err == io.EOF {
+			return false
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
 
+		if bytes.Equal(s2b, b) {
+			return true
+		}
+	}
+	return false
 }
